@@ -12,10 +12,11 @@ main{max-width:980px;margin:0 auto;padding:24px 16px 64px}h1{margin:0;font-size:
 .bars{display:flex;align-items:flex-end;gap:1px;height:90px;margin-top:10px;overflow:hidden}.bars i{flex:1 1 0;min-width:0;background:var(--ac);border-radius:1px 1px 0 0}
 .row{margin:12px 0}.row .t{display:flex;justify-content:space-between;font-size:13px;gap:8px}.bar{height:8px;border-radius:99px;background:var(--bd);margin-top:6px;overflow:hidden}.bar b{display:block;height:100%;background:var(--ac)}
 table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:8px;border-top:1px solid var(--bd);white-space:nowrap}th{color:var(--mu);border:0;font-weight:600}.sc{overflow-x:auto}
-.def p{margin:6px 0;font-size:12px;color:var(--mu)}a{color:var(--ac)}
+.def p{margin:6px 0;font-size:12px;color:var(--mu)}a{color:var(--ac)}small{font-size:13px;font-weight:600;color:var(--mu)}button{font:inherit;font-weight:700;background:var(--ac);color:#000;border:0;border-radius:8px;padding:7px 14px;cursor:pointer;margin-top:10px}button:disabled{opacity:.6}
 </style></head><body><main>
 <h1>Valor on-chain analytics</h1>
 <p class="sub" id="meta">Loading…</p>
+<button id="rf">Refresh</button> <span class="sub" id="rfs"></span>
 <h2 id="sh"></h2><div class="grid" id="scount"></div><div class="grid" id="scharts" style="margin-top:10px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))"></div><div class="card" style="margin-top:10px" id="season"></div><div class="card sc" style="margin-top:10px" id="epochs"></div>
 <h2>All time: players</h2><div class="grid" id="players"></div>
 <h2>All time: transactions and G$</h2><div class="grid" id="money"></div>
@@ -23,19 +24,24 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;p
 <h2>How this is counted</h2><div class="card def" id="defs"></div>
 <script>
 const n=(v,d=0)=>v==null?'n/a':Number(v).toLocaleString('en-US',{maximumFractionDigits:d});
+const g=v=>n(v)+'<small> G$</small>';
 const tile=(k,v,s)=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div>${s?`<div class="s">${s}</div>`:''}</div>`;
 const bars=(t,a,u='')=>{const m=Math.max(1,...a.map(x=>x.v)),tot=a.reduce((s,x)=>s+x.v,0);return `<div class="card"><div class="k">${t} <span style="float:right">total ${n(tot)}${u}</span></div><div class="bars">${a.map(x=>`<i title="${x.l}: ${n(x.v)}${u}" style="height:${Math.max(x.v>0?3:0,x.v/m*100)}%;opacity:${x.v>0?1:.15}"></i>`).join('')}</div><div class="s">${a[0].l} to ${a[a.length-1].l}</div></div>`};
-fetch('valor.json?t='+Date.now()).then(r=>r.json()).then(d=>{const t=d.totals;
+const API='https://api.github.com/repos/MarvyNwaokobia/Analytics/contents/docs/valor.json?ref=main';
+async function getData(){try{const r=await fetch(API,{headers:{Accept:'application/vnd.github.raw'},cache:'no-store'});if(r.ok)return await r.json()}catch(e){}return (await fetch('valor.json?t='+Date.now(),{cache:'no-store'})).json()}
+function render(d){const t=d.totals;
 meta.textContent=`Read directly from Valor's contracts on Celo since ${d.startDate}. Data as of ${new Date(d.asOf).toUTCString()}.`;
 players.innerHTML=tile('Players',n(t.players),'characters claimed, same as Dune')+tile('Active this month',n(t.mau))+tile('Active this week',n(t.wau))+tile('Weekly retention',d.latestRetentionPct==null?'n/a':d.latestRetentionPct+'%','last full week')+tile('Battles recorded',n(t.battles))+tile('Earners',n(t.earners),'paid by a reward pool');
-money.innerHTML=tile('On-chain txs',n(t.txs),`${n(t.txsLast30d)} in 30d, ${n(t.txsLast7d)} in 7d`)+tile('G$ moved',n(t.gMoved),'team wallets excluded')+tile('G$ spent in app',n(t.gSpentInApp))+tile('Spent in marketplace',n(t.gSpentMarketplace),n(t.marketplacePurchases)+' purchases')+tile('Marketplace revenue',n(t.marketplaceRevenue),n(t.marketplaceRevenueWithdrawn)+' withdrawn')+tile('Rewards paid',n(t.rewardsPaid),'both reward pools');
+money.innerHTML=tile('On-chain txs',n(t.txs),`${n(t.txsLast30d)} in 30d, ${n(t.txsLast7d)} in 7d`)+tile('G$ moved',g(t.gMoved),'team wallets excluded')+tile('G$ spent in app',g(t.gSpentInApp))+tile('Spent in marketplace',g(t.gSpentMarketplace),n(t.marketplacePurchases)+' purchases')+tile('Marketplace revenue',g(t.marketplaceRevenue),n(t.marketplaceRevenueWithdrawn)+' G$ withdrawn')+tile('Rewards paid',g(t.rewardsPaid),'both reward pools');
 const s=k=>d.days.map(x=>({l:x.date,v:x[k]}));
 charts.innerHTML=bars('Transactions',s('txs'))+bars('Active players',s('activePlayers'))+bars('New players',s('newPlayers'))+bars('G$ moved',s('gMoved'),' G$')+bars('Marketplace spend',s('marketplaceSpend'),' G$')+bars('Rewards paid',s('rewards'),' G$');
 if(d.season){const S=d.season,c=S.counters;sh.textContent=`${S.name}, ${S.start} to ${S.end}${S.started?'':' (starts '+S.start+', counting from zero)'}`;
-scount.innerHTML=tile('Transactions',n(c.txs),'since season start')+tile('New players',n(c.newPlayers))+tile('Active players',n(c.activePlayers),'played, bought or earned')+tile('G$ moved',n(c.gMoved))+tile('G$ spent in app',n(c.gSpent))+tile('Marketplace spend',n(c.marketplaceSpend),n(c.purchases)+' purchases')+tile('Marketplace revenue',n(c.revenue))+tile('Rewards paid',n(c.rewards),n(c.earners)+' earners')+tile('Battles recorded',n(c.battles));
+scount.innerHTML=tile('Transactions',n(c.txs),'since season start')+tile('New players',n(c.newPlayers))+tile('Active players',n(c.activePlayers),'played, bought or earned')+tile('G$ moved',g(c.gMoved))+tile('G$ spent in app',g(c.gSpent))+tile('Marketplace spend',g(c.marketplaceSpend),n(c.purchases)+' purchases')+tile('Marketplace revenue',g(c.revenue))+tile('Rewards paid',g(c.rewards),n(c.earners)+' earners')+tile('Battles recorded',n(c.battles));
 const q=k=>S.days.map(x=>({l:x.date,v:x[k]}));scharts.innerHTML=S.days.length?bars('Transactions',q('txs'))+bars('Active players',q('activePlayers'))+bars('New players',q('newPlayers'))+bars('G$ moved',q('gMoved'),' G$'):'<div class="card"><div class="s">Daily charts appear once the season starts.</div></div>';
 season.innerHTML=S.targets.map(x=>`<div class="row"><div class="t"><span>${x.label}</span><span>${x.actual==null?'<em>not on-chain</em>':n(x.actual,x.id=='weeklyRetentionPct'?1:0)} / ${n(x.target)} ${x.pct==null?'':'<b>'+x.pct+'%</b>'}</span></div><div class="bar"><b style="width:${Math.min(100,x.pct||0)}%"></b></div></div>`).join('')+'<div class="s">Players, active and retention are live totals. G$, revenue, txs and earners count from the season start.</div>';
-epochs.innerHTML='<table><tr><th>Epoch</th><th>Window</th><th>Txs</th><th>New</th><th>Active</th><th>G$ moved</th><th>Spent</th><th>Revenue</th><th>Rewards</th></tr>'+S.epochs.map(e=>`<tr><td>${e.epoch} ${e.status}</td><td>${e.start} to ${e.end}</td><td>${n(e.txs)}</td><td>${n(e.newPlayers)}</td><td>${n(e.activePlayers)}</td><td>${n(e.gMoved)}</td><td>${n(e.gSpent)}</td><td>${n(e.revenue)}</td><td>${n(e.rewards)}</td></tr>`).join('')+'</table>'}
+epochs.innerHTML='<table><tr><th>Epoch</th><th>Window</th><th>Txs</th><th>New</th><th>Active</th><th>G$ moved</th><th>G$ spent</th><th>G$ revenue</th><th>G$ rewards</th></tr>'+S.epochs.map(e=>`<tr><td>${e.epoch} ${e.status}</td><td>${e.start} to ${e.end}</td><td>${n(e.txs)}</td><td>${n(e.newPlayers)}</td><td>${n(e.activePlayers)}</td><td>${n(e.gMoved)}</td><td>${n(e.gSpent)}</td><td>${n(e.revenue)}</td><td>${n(e.rewards)}</td></tr>`).join('')+'</table>'}
 defs.innerHTML=Object.entries(d.definitions).map(([k,v])=>`<p><b>${k}:</b> ${v}</p>`).join('')+`<p><b>excluded wallets:</b> ${d.excludedWallets.map(w=>w.wallet.slice(0,6)+'…'+w.wallet.slice(-4)+' ('+w.label+')').join('; ')}</p><p>Source and method: <a href="https://github.com/MarvyNwaokobia/Analytics">github.com/MarvyNwaokobia/Analytics</a></p>`;
-}).catch(e=>meta.textContent='Could not load valor.json: '+e.message);
+}
+async function load(){rf.disabled=true;rf.textContent='Loading';try{render(await getData());rfs.textContent='checked '+new Date().toLocaleTimeString()+'. The numbers refresh every hour.'}catch(e){meta.textContent='Could not load data: '+e.message}rf.disabled=false;rf.textContent='Refresh'}
+rf.onclick=load;load();
 </script></main></body></html>
