@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Valor On-chain Analytics</title>
+<style>
+:root{--bg:#0b0d12;--card:#141821;--bd:#252b38;--tx:#e8ebf2;--mu:#8a93a6;--ac:#eab308}
+@media(prefers-color-scheme:light){:root{--bg:#f6f7fa;--card:#fff;--bd:#dde1ea;--tx:#161a23;--mu:#5d6679;--ac:#b88a00}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 64px}h1{margin:0;font-size:26px}h2{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mu);margin:32px 0 10px}
+.sub{color:var(--mu);font-size:13px;margin:4px 0 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px}.k{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mu)}
+.v{font-size:26px;font-weight:800;margin-top:4px}.s{font-size:11px;color:var(--mu);margin-top:2px}
+.bars{display:flex;align-items:flex-end;gap:2px;height:90px;margin-top:10px}.bars i{flex:1;min-width:2px;background:var(--ac);border-radius:2px 2px 0 0}
+.row{margin:12px 0}.row .t{display:flex;justify-content:space-between;font-size:13px;gap:8px}.bar{height:8px;border-radius:99px;background:var(--bd);margin-top:6px;overflow:hidden}.bar b{display:block;height:100%;background:var(--ac)}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:8px;border-top:1px solid var(--bd);white-space:nowrap}th{color:var(--mu);border:0;font-weight:600}.sc{overflow-x:auto}
+.def p{margin:6px 0;font-size:12px;color:var(--mu)}a{color:var(--ac)}
+</style></head><body><main>
+<h1>Valor on-chain analytics</h1>
+<p class="sub" id="meta">Loading…</p>
+<h2>Players</h2><div class="grid" id="players"></div>
+<h2>Transactions and G$</h2><div class="grid" id="money"></div>
+<h2>Daily activity since launch</h2><div class="grid" id="charts"></div>
+<h2 id="sh"></h2><div class="card" id="season"></div><div class="card sc" style="margin-top:10px" id="epochs"></div>
+<h2>How this is counted</h2><div class="card def" id="defs"></div>
+<script>
+const n=(v,d=0)=>v==null?'n/a':Number(v).toLocaleString('en-US',{maximumFractionDigits:d});
+const tile=(k,v,s)=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div>${s?`<div class="s">${s}</div>`:''}</div>`;
+const bars=(t,a,u='')=>{const m=Math.max(1,...a.map(x=>x.v)),tot=a.reduce((s,x)=>s+x.v,0);return `<div class="card"><div class="k">${t} <span style="float:right">total ${n(tot)}${u}</span></div><div class="bars">${a.map(x=>`<i title="${x.l}: ${n(x.v)}${u}" style="height:${Math.max(x.v>0?3:0,x.v/m*100)}%;opacity:${x.v>0?1:.15}"></i>`).join('')}</div><div class="s">${a[0].l} to ${a[a.length-1].l}</div></div>`};
+fetch('valor.json?t='+Date.now()).then(r=>r.json()).then(d=>{const t=d.totals;
+meta.textContent=`Read directly from Valor's contracts on Celo since ${d.startDate}. Data as of ${new Date(d.asOf).toUTCString()}.`;
+players.innerHTML=tile('Players',n(t.players),'characters claimed, same as Dune')+tile('Verified right now',n(t.verifiedNow),'GoodDollar whitelist, lower bound')+tile('Active this month',n(t.mau))+tile('Active this week',n(t.wau))+tile('Weekly retention',d.latestRetentionPct==null?'n/a':d.latestRetentionPct+'%','last full week')+tile('Battles recorded',n(t.battles))+tile('Earners',n(t.earners),'paid by a reward pool');
+money.innerHTML=tile('On-chain txs',n(t.txs),`${n(t.txsLast30d)} in 30d, ${n(t.txsLast7d)} in 7d`)+tile('G$ moved',n(t.gMoved),'team wallets excluded')+tile('G$ spent in app',n(t.gSpentInApp))+tile('Spent in marketplace',n(t.gSpentMarketplace),n(t.marketplacePurchases)+' purchases')+tile('Marketplace revenue',n(t.marketplaceRevenue),n(t.marketplaceRevenueWithdrawn)+' withdrawn')+tile('Rewards paid',n(t.rewardsPaid),'both reward pools');
+const s=k=>d.days.map(x=>({l:x.date,v:x[k]}));
+charts.innerHTML=bars('Transactions',s('txs'))+bars('Active players',s('activePlayers'))+bars('New players',s('newPlayers'))+bars('G$ moved',s('gMoved'),' G$')+bars('Marketplace spend',s('marketplaceSpend'),' G$')+bars('Rewards paid',s('rewards'),' G$');
+if(d.season){const S=d.season;sh.textContent=`${S.name}, ${S.start} to ${S.end}${S.started?'':' (starts soon)'}`;
+season.innerHTML=S.targets.map(x=>`<div class="row"><div class="t"><span>${x.label}</span><span>${x.actual==null?'<em>not on-chain</em>':n(x.actual,x.id=='weeklyRetentionPct'?1:0)} / ${n(x.target)} ${x.pct==null?'':'<b>'+x.pct+'%</b>'}</span></div><div class="bar"><b style="width:${Math.min(100,x.pct||0)}%"></b></div></div>`).join('')+'<div class="s">Players, active and retention are live totals. G$, revenue, txs and earners count from the season start.</div>';
+epochs.innerHTML='<table><tr><th>Epoch</th><th>Window</th><th>Txs</th><th>New</th><th>Active</th><th>G$ moved</th><th>Spent</th><th>Revenue</th><th>Rewards</th></tr>'+S.epochs.map(e=>`<tr><td>${e.epoch} ${e.status}</td><td>${e.start} to ${e.end}</td><td>${n(e.txs)}</td><td>${n(e.newPlayers)}</td><td>${n(e.activePlayers)}</td><td>${n(e.gMoved)}</td><td>${n(e.gSpent)}</td><td>${n(e.revenue)}</td><td>${n(e.rewards)}</td></tr>`).join('')+'</table>'}
+defs.innerHTML=Object.entries(d.definitions).map(([k,v])=>`<p><b>${k}:</b> ${v}</p>`).join('')+`<p><b>excluded wallets:</b> ${d.excludedWallets.map(w=>w.wallet.slice(0,6)+'…'+w.wallet.slice(-4)+' ('+w.label+')').join('; ')}</p><p>Source and method: <a href="https://github.com/MarvyNwaokobia/Analytics">github.com/MarvyNwaokobia/Analytics</a></p>`;
+}).catch(e=>meta.textContent='Could not load valor.json: '+e.message);
+</script></main></body></html>

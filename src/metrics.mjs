@@ -79,6 +79,10 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     const w = e.args.player.toLowerCase()
     if (isPlayerish(w) && !claimTs.has(w)) claimTs.set(w, e.ts)
   }
+  // Drop wallets whose FIRST claim fell inside a known bot-signup window (same rule Dune's onboarded_users uses).
+  const windows = (project.excludeClaimWindows ?? []).map((x) => [Date.parse(x.from) / 1000, Date.parse(x.to) / 1000])
+  let spikeClaims = 0
+  for (const [w, ts] of [...claimTs]) if (windows.some(([a, b]) => ts >= a && ts <= b)) { claimTs.delete(w); spikeClaims++ }
   const ver = new Map(db.prepare('SELECT wallet, is_verified, checked_at FROM verified').all().map((r) => [r.wallet, r]))
   const verifiedAt = Math.max(0, ...[...ver.values()].map((v) => v.checked_at))
   // A player counts from the later of: character claimed, GoodDollar verification recorded on-chain
@@ -93,8 +97,12 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
   // The live whitelist alone undercounts: GoodDollar lapses whitelists within days, so people who did verify drop out.
   // VerificationRecorded only exists since 2026-08-26; earlier verifications are only visible if still whitelisted.
   const isVerified = (w) => verTs.has(w) || ver.get(w)?.is_verified === 1
-  const players = new Set([...claimTs.keys()].filter(isVerified))
-  const playerSince = (w) => Math.max(claimTs.get(w), verTs.get(w) ?? 0)
+  // PLAYER = created a character (bot-spike claims excluded). Valor only lets verified humans in, so this is
+  // the same figure Dune reports as onboarded_users. `verifiedNow` is tracked separately because the live
+  // whitelist lapses and the on-chain verification record only exists since 2026-08-26.
+  const players = new Set(claimTs.keys())
+  const verifiedPlayers = new Set([...players].filter(isVerified))
+  const playerSince = (w) => claimTs.get(w) // dated by character claim, as Dune does
 
   // ---- activity: every event a real wallet takes part in (played, bought, earned, sent or received G$)
   const act = [] // {w, ts}
@@ -151,7 +159,8 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     txs: txTs.size,
     txsLast7d: txCount(now - 7 * DAY, FAR), txsLast30d: txCount(now - 30 * DAY, FAR),
     charactersClaimed: claimTs.size,
-    verifiedAmongClaimed: players.size,
+    spikeClaimsExcluded: spikeClaims,
+    verifiedNow: verifiedPlayers.size,
     verifiedOnChainEvent: [...claimTs.keys()].filter((w) => verTs.has(w)).length,
     verifiedLiveOnly: [...claimTs.keys()].filter((w) => !verTs.has(w) && ver.get(w)?.is_verified === 1).length,
     players: players.size,
@@ -278,7 +287,8 @@ export function printMetrics(m) {
   console.log(`\n${m.name.toUpperCase()} on-chain analytics (as of ${m.asOf})\n`)
   p('On-chain txs (all / 30d / 7d)', `${fmt(t.txs)} / ${fmt(t.txsLast30d)} / ${fmt(t.txsLast7d)}`)
   p('Characters claimed', fmt(t.charactersClaimed))
-  p('Players (character + verified)', `${fmt(t.players)}${t.verifiedCheckedAt ? '' : '  (run verify first)'}`)
+  p('Players (character claimed, spike out)', fmt(t.players))
+  p('  verified now (live/recorded)', `${fmt(t.verifiedNow)}  (lower bound: whitelists lapse)`)
   p('Players active MAU / WAU', `${fmt(t.mau)} / ${fmt(t.wau)}`)
   p('Battles recorded', fmt(t.battles))
   p('G$ moved (team wallets excluded)', fmt(t.gMoved))

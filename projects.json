@@ -42,7 +42,7 @@
         ],
         "targets": {
           "verifiedPlayers": {
-            "label": "Verified players (with a character)",
+            "label": "Players (characters claimed)",
             "value": 2000,
             "kind": "stock"
           },
@@ -102,7 +102,14 @@
             "kind": "offchain"
           }
         }
-      }
+      },
+      "excludeClaimWindows": [
+        {
+          "from": "2026-08-16T05:00:00Z",
+          "to": "2026-08-16T11:52:00Z",
+          "label": "Automated signup spike (bot claims), same window Dune excludes"
+        }
+      ]
     }
   }
 }
