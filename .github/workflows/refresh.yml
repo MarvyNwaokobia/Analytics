@@ -1,0 +1,31 @@
+name: refresh
+on:
+  schedule: [{ cron: '17 */6 * * *' }]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: refresh
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      # The SQLite index is the expensive part (first backfill ~1h), so it lives in the Actions cache.
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: analytics-db-${{ github.run_id }}
+          restore-keys: analytics-db-
+      - run: mkdir -p data && npm run refresh
+        env:
+          CELO_RPC_URL: ${{ secrets.CELO_RPC_URL }}
+      - name: Commit feed
+        run: |
+          git config user.name "analytics-bot"
+          git config user.email "analytics-bot@users.noreply.github.com"
+          git add public/*.json
+          git diff --cached --quiet || (git commit -m "Refresh analytics feed" && git push)

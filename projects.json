@@ -1,0 +1,108 @@
+{
+  "rpc": "https://forno.celo.org",
+  "gdToken": "0x62B8B11039FcfE5aB0C56E502b1C372A3d2a9c7A",
+  "identity": "0xC361A6E67822a0EDc17D899227dd9FC50BD62F42",
+  "projects": {
+    "valor": {
+      "name": "Valor",
+      "startDate": "2026-06-01",
+      "contracts": {
+        "ValorItems": "0x3ba09c51895Dacb90273A2A40C95369a5A1b4bFe",
+        "ValorMarketplace": "0x95D167f569cf05C967C0432e3123baeac5D8d78D",
+        "RewardPoolMain": "0x12a3f711A55f4dB0e9AF26C7429cc5018401F1f4",
+        "RewardPoolEndless": "0xd44D31645e3abBDc48a6Fc5E6E1bCd894db77Ba0",
+        "ValorGameRecord": "0xd4ec6dB553E206cdf741448F94bD3B02D81c8571"
+      },
+      "abis": {
+        "ValorItems": "ValorItems",
+        "ValorMarketplace": "ValorMarketplace",
+        "RewardPoolMain": "ValorRewardPool",
+        "RewardPoolEndless": "ValorRewardPool",
+        "ValorGameRecord": "ValorGameRecord"
+      },
+      "pools": [
+        "RewardPoolMain",
+        "RewardPoolEndless"
+      ],
+      "excludeWallets": {
+        "0x222054050310e28a492c3ff4e2f120b936c4b99d": "Valor team funding wallet (pool funder)",
+        "0x65d25f54cf80761b2d018ad10800921fce8303bf": "Valor relay (current)",
+        "0x43a5ba0da132b21bdacfbc4392b72eebaf6f2d82": "Valor relay (old)"
+      },
+      "season": {
+        "name": "GoodBuilders Season 5",
+        "start": "2026-11-16",
+        "epochEnds": [
+          "2026-11-29",
+          "2026-12-13",
+          "2026-12-27",
+          "2027-01-10",
+          "2027-01-24",
+          "2027-02-07"
+        ],
+        "targets": {
+          "verifiedPlayers": {
+            "label": "Verified players (with a character)",
+            "value": 2000,
+            "kind": "stock"
+          },
+          "monthlyActive": {
+            "label": "Monthly active players",
+            "value": 1600,
+            "kind": "stock"
+          },
+          "weeklyActive": {
+            "label": "Weekly active players",
+            "value": 800,
+            "kind": "stock"
+          },
+          "weeklyRetentionPct": {
+            "label": "Weekly retention (%)",
+            "value": 60,
+            "kind": "stock"
+          },
+          "gMoved": {
+            "label": "G$ moved",
+            "value": 5000000,
+            "kind": "flow"
+          },
+          "gSpent": {
+            "label": "G$ spent in app",
+            "value": 1000000,
+            "kind": "flow"
+          },
+          "revenue": {
+            "label": "Marketplace revenue (G$)",
+            "value": 1000000,
+            "kind": "flow"
+          },
+          "rewards": {
+            "label": "Rewards paid out (G$)",
+            "value": 1600000,
+            "kind": "flow"
+          },
+          "txs": {
+            "label": "On-chain txs",
+            "value": 30000,
+            "kind": "flow"
+          },
+          "earners": {
+            "label": "Earners",
+            "value": 800,
+            "kind": "flow"
+          },
+          "groups": {
+            "label": "Groups",
+            "value": 16,
+            "kind": "offchain"
+          },
+          "staked": {
+            "label": "G$ staked in Face-Off duels",
+            "value": 900000,
+            "kind": "offchain"
+          }
+        }
+      }
+    }
+  }
+}

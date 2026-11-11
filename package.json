@@ -1,0 +1,18 @@
+{
+  "name": "gooddollar-builder-analytics",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "index": "node src/cli.mjs index",
+    "verify": "node src/cli.mjs verify",
+    "report": "node src/cli.mjs report",
+    "publish": "node src/cli.mjs publish",
+    "refresh": "node src/cli.mjs index && node src/cli.mjs verify && node src/cli.mjs publish"
+  },
+  "dependencies": {
+    "viem": "^2.52.0"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
