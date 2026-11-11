@@ -27,5 +27,5 @@ jobs:
         run: |
           git config user.name "analytics-bot"
           git config user.email "analytics-bot@users.noreply.github.com"
-          git add public/*.json
+          git add public/*.json docs/*.json
           git diff --cached --quiet || (git commit -m "Refresh analytics feed" && git push)

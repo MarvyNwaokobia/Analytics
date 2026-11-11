@@ -10,7 +10,7 @@ Chain-only analytics for GoodDollar builders. A project is a list of Celo contra
 
 Individual steps: `npm run index` (incremental; first backfill ~1h, Forno caps getLogs at 5,000 blocks), `npm run verify`, `npm run publish`.
 
-`public/valor.json` is the feed the Valor admin page (`/admin/analytics`) reads. A scheduled workflow (`.github/workflows/refresh.yml`) refreshes it every 6 hours.
+`public/valor.json` is the feed the Valor admin page (`/admin/analytics`) reads; `docs/index.html` + `docs/valor.json` are the public dashboard served by GitHub Pages. A scheduled workflow (`.github/workflows/refresh.yml`) refreshes it every 6 hours.
 
 ## What is counted
 

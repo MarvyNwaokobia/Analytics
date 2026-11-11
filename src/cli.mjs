@@ -24,8 +24,10 @@ else if (cmd === 'report') {
 } else if (cmd === 'publish') {
   // Writes the static dashboard feed. The Valor admin page and public/index.html both read this file.
   const m = buildMetrics(db, key, project)
-  writeFileSync(path.join(dir, '..', 'public', `${key}.json`), JSON.stringify(m))
-  console.log(`wrote public/${key}.json`)
+  const out = JSON.stringify(m)
+  writeFileSync(path.join(dir, '..', 'public', `${key}.json`), out) // read by the Valor admin page
+  writeFileSync(path.join(dir, '..', 'docs', `${key}.json`), out) // read by the GitHub Pages dashboard (docs/index.html)
+  console.log(`wrote public/${key}.json and docs/${key}.json`)
 } else {
   console.error('usage: cli.mjs index|verify|report|publish [project] [--json]')
   process.exit(1)
