@@ -81,7 +81,6 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
   }
   const ver = new Map(db.prepare('SELECT wallet, is_verified, checked_at FROM verified').all().map((r) => [r.wallet, r]))
   const verifiedAt = Math.max(0, ...[...ver.values()].map((v) => v.checked_at))
-  const players = new Set([...claimTs.keys()].filter((w) => ver.get(w)?.is_verified === 1))
   // A player counts from the later of: character claimed, GoodDollar verification recorded on-chain
   // (VerificationRecorded). Wallets verified before the event existed fall back to their claim time.
   const verTs = new Map()
@@ -90,6 +89,11 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     const w = e.args.wallet.toLowerCase()
     if (!verTs.has(w)) verTs.set(w, e.ts)
   }
+  // Verified = GoodDollar verification was recorded on-chain by Valor, OR the wallet is whitelisted right now.
+  // The live whitelist alone undercounts: GoodDollar lapses whitelists within days, so people who did verify drop out.
+  // VerificationRecorded only exists since 2026-08-26; earlier verifications are only visible if still whitelisted.
+  const isVerified = (w) => verTs.has(w) || ver.get(w)?.is_verified === 1
+  const players = new Set([...claimTs.keys()].filter(isVerified))
   const playerSince = (w) => Math.max(claimTs.get(w), verTs.get(w) ?? 0)
 
   // ---- activity: every event a real wallet takes part in (played, bought, earned, sent or received G$)
@@ -148,6 +152,8 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     txsLast7d: txCount(now - 7 * DAY, FAR), txsLast30d: txCount(now - 30 * DAY, FAR),
     charactersClaimed: claimTs.size,
     verifiedAmongClaimed: players.size,
+    verifiedOnChainEvent: [...claimTs.keys()].filter((w) => verTs.has(w)).length,
+    verifiedLiveOnly: [...claimTs.keys()].filter((w) => !verTs.has(w) && ver.get(w)?.is_verified === 1).length,
     players: players.size,
     wau: activePlayers(now - 7 * DAY, FAR).size,
     mau: activePlayers(now - 30 * DAY, FAR).size,

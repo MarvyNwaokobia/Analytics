@@ -14,14 +14,14 @@ Individual steps: `npm run index` (incremental; first backfill ~1h, Forno caps g
 
 ## What is counted
 
-- **Player** = a wallet that created a character (`CharacterClaimed`) AND is currently GoodDollar-whitelisted. Dated from the later of the claim and `VerificationRecorded`.
+- **Player** = a wallet that created a character (`CharacterClaimed`) AND is GoodDollar-verified: `VerificationRecorded` on-chain (exists since 2026-08-26) OR whitelisted right now. Live whitelist alone undercounts because GoodDollar lapses whitelists within days. Dated from the later of the claim and `VerificationRecorded`.
 - **Active** = a player who played, bought, earned, or sent/received G$ in the window, counted from contract events.
 - **Excluded**: team and relay wallets (`excludeWallets` in `projects.json`) plus any `FundsDeposited` sender, so pool funding never looks like player spend.
 - **Season**: `season` in `projects.json` holds the start date, epoch ends and targets; the report shows actual vs target and a per-epoch table.
 
 ## Caveats
 
-- Characters claimed on-chain (1,505) is far above verified players (112) because Aug 2026 referral-farm wallets claimed characters but were never GoodDollar-verified. Players are the verified ones.
+- Characters claimed on-chain (1,505) is far above verified players because Aug 2026 referral-farm wallets claimed characters. Verification before 2026-08-26 left no on-chain record, so earlier players count only while still whitelisted; the Valor database (about 502 onboarded) is the fuller record.
 - Verified is a live snapshot (GoodDollar un-whitelists over time).
 - Not in contract data: groups, Face-Off duel stakes, the withdrawal fee and duel house cut.
 - Contract addresses in `projects.json` must be valid; lowercase is safest.
