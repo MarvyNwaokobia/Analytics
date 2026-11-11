@@ -261,7 +261,23 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
         activePlayers: activePlayers(a, b).size,
       }
     })
-    season = { name: s.name, start: s.start, end: s.epochEnds[s.epochEnds.length - 1], started, targets, epochs }
+    // Season-to-date counters, counting only from the season start. Zero (and no daily series) until it starts.
+    const win = [sStart, upto]
+    const counters = started ? {
+      txs: flow.txs, gMoved: flow.gMoved, gSpent: flow.gSpent, revenue: flow.revenue, rewards: flow.rewards, earners: flow.earners,
+      newPlayers: [...players].filter((w) => inWin(playerSince(w), ...win)).length,
+      activePlayers: activePlayers(...win).size,
+      marketplaceSpend: sumKind('mktSpend', ...win),
+      purchases: money.filter((x) => x.kind === 'mktSpend' && inWin(x.ts, ...win)).length,
+      battles: events.filter((e) => e.event === 'BattleRecorded' && inWin(e.ts, ...win)).length,
+    } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, earners: 0, newPlayers: 0, activePlayers: 0, marketplaceSpend: 0, purchases: 0, battles: 0 }
+    const sDays = []
+    if (started) for (let t = sStart; t < upto; t += DAY) {
+      const a = t, b = t + DAY
+      sDays.push({ date: dayKey(a), txs: txCount(a, b), newPlayers: [...players].filter((w) => inWin(playerSince(w), a, b)).length,
+        activePlayers: activePlayers(a, b).size, gMoved: moved(a, b), gSpent: sumKind('in', a, b), rewards: sumKind('reward', a, b) })
+    }
+    season = { name: s.name, start: s.start, end: s.epochEnds[s.epochEnds.length - 1], started, counters, days: sDays, targets, epochs }
   }
 
   return {
