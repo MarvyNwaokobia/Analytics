@@ -274,6 +274,17 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
   const txCount = (a, b) => [...txTs.values()].filter((t) => inWin(t, a, b)).length
   const earnersIn = (a, b) => new Set(money.filter((m) => (m.kind === 'reward' || m.kind === 'prize') && inWin(m.ts, a, b)).map((m) => m.w))
 
+  // Runs started, by mode, from AttemptStarted (the only game-record event that names its mode). Endless and
+  // Seasonal runs are recorded since 2026-11-23, Gauntlet runs since 2026-08-29. Only players count.
+  const RUN_MODES = ['endless', 'seasonal', 'gauntlet']
+  const runEvents = events.filter((e) => e.event === 'AttemptStarted' && isPlayerish(e.args.player.toLowerCase()))
+  const runsIn = (a, b) => {
+    const out = Object.fromEntries(RUN_MODES.map((m) => [m, 0]))
+    for (const e of runEvents) if (inWin(e.ts, a, b)) out[e.args.mode] = (out[e.args.mode] ?? 0) + 1
+    return out
+  }
+  const runCount = (a, b) => runEvents.filter((e) => inWin(e.ts, a, b)).length
+
   const FAR = 1e12
   const totals = {
     txs: txTs.size,
@@ -288,6 +299,8 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     mau: activePlayers(now - 30 * DAY, FAR).size,
     activeAnyWalletMau: activeAll(now - 30 * DAY, FAR).size,
     battles: events.filter((e) => e.event === 'BattleRecorded').length,
+    runs: runCount(0, FAR),
+    runsByMode: runsIn(0, FAR),
     gMoved: moved(0, FAR),
     gSpentInApp: sumKind('in', 0, FAR),
     gSpentMarketplace: sumKind('mktSpend', 0, FAR),
@@ -331,6 +344,7 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       staked: sumKind('duelStake', a, b),
       rewards: rewards(a, b),
       prizes: sumKind('prize', a, b),
+      runs: runCount(a, b),
     })
   }
 
@@ -417,7 +431,9 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       duelRefunded: sumKind('duelRefund', ...win),
       purchases: money.filter((x) => x.kind === 'mktSpend' && inWin(x.ts, ...win)).length,
       battles: events.filter((e) => e.event === 'BattleRecorded' && inWin(e.ts, ...win)).length,
-    } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, earners: 0, newPlayers: 0, activePlayers: 0, marketplaceSpend: 0, revenueBreakdown: { marketplace: 0, withdrawFee: 0, duelCut: 0 }, staked: 0, prizes: 0, duelStakes: 0, duelPaidToWinners: 0, duelRefunded: 0, purchases: 0, battles: 0 }
+      runs: runCount(...win),
+      runsByMode: runsIn(...win),
+    } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, earners: 0, newPlayers: 0, activePlayers: 0, marketplaceSpend: 0, revenueBreakdown: { marketplace: 0, withdrawFee: 0, duelCut: 0 }, staked: 0, prizes: 0, duelStakes: 0, duelPaidToWinners: 0, duelRefunded: 0, purchases: 0, battles: 0, runs: 0, runsByMode: Object.fromEntries(RUN_MODES.map((m) => [m, 0])) }
     const sDays = []
     if (started) for (let t = sStart; t < upto; t += DAY) {
       const a = t, b = t + DAY
@@ -443,6 +459,8 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       prizes: 'Season and referral-campaign payouts, recognised by their on-chain reference (derived from the program id). Prizes paid before a season starts count in all-time totals and are listed on the season, but not toward its targets.',
       staked: 'G$ players put up as duel stakes (Face-Off and wave race share one escrow, so they are counted together).',
       duelUnsettled: 'Stakes not yet paid out or refunded: open challenges and accepted duels that never resolved. Prize plus cut equals both stakes, so this is what remains.',
+      battles: 'Every BattleRecorded: campaign fights, duels, each Endless or Seasonal wave cleared and each death, and each finished Gauntlet run.',
+      runs: 'Runs started, by mode (AttemptStarted). Endless and Seasonal runs are recorded from 2026-11-23, Gauntlet runs from 2026-08-29. Each run\'s waves also count as battles.',
       revenue: 'G$ Valor keeps: marketplace sales and resale fees, plus the withdrawal fee (relay-sent transfers into the treasury), plus the duel house cut (stake pair minus the winner\'s prize).',
       withdrawFee: 'The cut of each in-app withdrawal, sent by the relay to the treasury wallet. G$ sent to the treasury by hand is not counted.',
       duelCut: 'A reward-pool payout counts as a duel win when it equals the winner\'s share of a stake tier and the winner staked that tier in the previous 30 days. The cut stays in the pool.',
@@ -465,6 +483,7 @@ export function printMetrics(m) {
   p('  verified now (live/recorded)', `${fmt(t.verifiedNow)}  (lower bound: whitelists lapse)`)
   p('Players active MAU / WAU', `${fmt(t.mau)} / ${fmt(t.wau)}`)
   p('Battles recorded', fmt(t.battles))
+  p('Runs started (endless / seasonal / gauntlet)', `${fmt(t.runs)} (${fmt(t.runsByMode.endless)} / ${fmt(t.runsByMode.seasonal)} / ${fmt(t.runsByMode.gauntlet)})`)
   p('G$ moved (team wallets excluded)', fmt(t.gMoved))
   p('G$ spent in app', fmt(t.gSpentInApp))
   p('  of which marketplace', `${fmt(t.gSpentMarketplace)} (${fmt(t.marketplacePurchases)} purchases)`)
