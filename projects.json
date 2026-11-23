@@ -42,7 +42,8 @@
           50000
         ],
         "houseCutBps": 50,
-        "maxDaysStakeToPayout": 30
+        "maxDaysStakeToPayout": 30,
+        "maxPayoutChunk": 10000
       },
       "excludeWallets": {
         "0x222054050310e28a492c3ff4e2f120b936c4b99d": "Valor team funding wallet (pool funder)",
@@ -121,9 +122,9 @@
             "kind": "offchain"
           },
           "staked": {
-            "label": "G$ staked in Face-Off duels",
+            "label": "G$ staked in duels",
             "value": 900000,
-            "kind": "offchain"
+            "kind": "flow"
           }
         }
       },
