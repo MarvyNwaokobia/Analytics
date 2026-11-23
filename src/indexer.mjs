@@ -89,6 +89,7 @@ export async function indexProject({ db, client, cfg, key, project, log = consol
     from = last + 1n
   }
   await indexRevenueWallets({ db, client, cfg, key, project, head, log })
+  await syncPrograms({ db, key, project, log })
   await fillBlockTimes({ db, client, key, log })
 }
 
@@ -178,4 +179,26 @@ export async function checkVerified({ db, client, cfg, key, project, log = conso
     db.exec('COMMIT')
     log(`[${key}] verified check ${Math.min(i + 200, wallets.length)}/${wallets.length}`)
   }
+}
+
+// Season and referral-campaign ids, from the project's public list plus any listed in config. A failed fetch
+// keeps what was stored last time, so one API hiccup never unlabels prizes.
+async function syncPrograms({ db, key, project, log }) {
+  const cfg = project.prizePrograms
+  if (!cfg) return
+  const up = db.prepare(`INSERT INTO programs VALUES (?,?,?,?,?,?)
+    ON CONFLICT(project, kind, id) DO UPDATE SET name = excluded.name, starts_at = excluded.starts_at, ends_at = excluded.ends_at`)
+  const rows = [...(cfg.known ?? [])]
+  if (cfg.url) {
+    try {
+      const res = await fetch(cfg.url, { signal: AbortSignal.timeout(15_000) })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const body = await res.json()
+      for (const s of body.seasons ?? []) rows.push({ kind: 'season', id: s.id, name: s.name, startsAt: s.starts_at, endsAt: s.ends_at })
+      for (const c of body.referral_campaigns ?? []) rows.push({ kind: 'referralCampaign', id: c.id, name: c.name, startsAt: c.starts_at, endsAt: c.ends_at })
+    } catch (e) {
+      log(`[${key}] prize programs: could not fetch ${cfg.url} (${e.message}); using stored and configured ones`)
+    }
+  }
+  for (const r of rows) up.run(key, r.kind, r.id.toLowerCase(), r.name, r.startsAt ?? null, r.endsAt ?? null)
 }

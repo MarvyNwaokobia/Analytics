@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { decodeEventLog, getEventSelector } from 'viem'
+import { decodeEventLog, getEventSelector, keccak256, toBytes } from 'viem'
 
 const DAY = 86400
 const ZERO = '0x0000000000000000000000000000000000000000'
@@ -184,6 +184,41 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     }
   }
 
+  // ---- prizes: season and referral-campaign payouts, told apart from gameplay rewards
+  // Each prize chunk is a BountyDistributed whose ref is keccak("<format>") over the program id, the winner's
+  // lowercase wallet and the chunk index. Chunks are sent in order, so a winner's refs are checked from 0 until
+  // one is missing. The prize label then attaches to the G$ transfer in the same tx.
+  const prizeOf = new Map() // tx -> program
+  const programs = []
+  if (project.prizePrograms) {
+    const fmts = project.prizePrograms.refFormats
+    const bounties = events.filter((e) => e.event === 'BountyDistributed')
+    const byRef = new Map(bounties.map((e) => [e.args.ref.toLowerCase(), e]))
+    const winners = [...new Set(bounties.map((e) => e.args.player.toLowerCase()))]
+    const rows = db.prepare('SELECT kind, id, name, starts_at, ends_at FROM programs WHERE project = ? ORDER BY starts_at').all(key)
+    for (const pg of rows) {
+      const fmt = fmts[pg.kind]
+      if (!fmt) continue
+      let g = 0, paidTo = 0, first = null, last = null
+      for (const w of winners) {
+        let hit = false
+        for (let i = 0; ; i++) {
+          const ref = keccak256(toBytes(fmt.replace('{id}', pg.id).replace('{wallet}', w).replace('{i}', String(i))))
+          const e = byRef.get(ref)
+          if (!e) break
+          hit = true
+          prizeOf.set(e.tx, pg.name)
+          g += gd(e.args.amount)
+          first = first === null ? e.ts : Math.min(first, e.ts)
+          last = last === null ? e.ts : Math.max(last, e.ts)
+        }
+        if (hit) paidTo++
+      }
+      programs.push({ kind: pg.kind, name: pg.name, startsAt: pg.starts_at, endsAt: pg.ends_at, paidG: g, winners: paidTo,
+        firstPaid: first && dayKey(first), lastPaid: last && dayKey(last) })
+    }
+  }
+
   // ---- money, excluding team wallets
   const poolAddrs = new Set((project.pools ?? []).map((n) => project.contracts[n].toLowerCase()))
   const money = [] // {ts, kind, g, revenue?, w}
@@ -195,6 +230,10 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       // The house cut is booked once per win, on the last chunk of the prize.
       const cut = duel.kind === 'duelWin' && duel.last ? 2 * duel.tier - Math.floor((2 * duel.tier * (10_000 - project.duels.houseCutBps)) / 10_000) : undefined
       money.push({ ts: f.ts, kind: duel.kind, g, revenue: cut, w: f.wallet })
+      continue
+    }
+    if (f.direction === 'out' && poolAddrs.has(f.contract) && prizeOf.has(f.tx_hash)) {
+      money.push({ ts: f.ts, kind: 'prize', g, w: f.wallet, program: prizeOf.get(f.tx_hash) })
       continue
     }
     money.push({ ts: f.ts, kind: f.direction === 'in' ? 'in' : (poolAddrs.has(f.contract) ? 'reward' : 'mktOut'), g, w: f.wallet })
@@ -225,13 +264,15 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
   const REVENUE_KINDS = new Set(['mktSpend', 'withdrawFee', 'duelWin'])
   const revenue = (a, b) => money.filter((m) => REVENUE_KINDS.has(m.kind) && inWin(m.ts, a, b)).reduce((s, m) => s + (m.revenue ?? 0), 0)
   // Every G$ that crossed a Valor contract, duel escrow included (stakes in, prizes and refunds out).
-  const MOVED_KINDS = new Set(['in', 'reward', 'mktOut', 'duelStake', 'duelWin', 'duelRefund'])
+  const MOVED_KINDS = new Set(['in', 'reward', 'prize', 'mktOut', 'duelStake', 'duelWin', 'duelRefund'])
+  // Rewards = everything Valor pays players from its pools: gameplay rewards plus season and campaign prizes.
+  const rewards = (a, b) => sumKind('reward', a, b) + sumKind('prize', a, b)
   const moved = (a, b) => money.filter((m) => MOVED_KINDS.has(m.kind) && inWin(m.ts, a, b)).reduce((s, m) => s + m.g, 0)
   const countKind = (kind, a, b, pred = () => true) => money.filter((m) => m.kind === kind && inWin(m.ts, a, b) && pred(m)).length
   const activePlayers = (a, b) => new Set(act.filter((x) => players.has(x.w) && inWin(x.ts, a, b)).map((x) => x.w))
   const activeAll = (a, b) => new Set(act.filter((x) => inWin(x.ts, a, b)).map((x) => x.w))
   const txCount = (a, b) => [...txTs.values()].filter((t) => inWin(t, a, b)).length
-  const earnersIn = (a, b) => new Set(money.filter((m) => m.kind === 'reward' && inWin(m.ts, a, b)).map((m) => m.w))
+  const earnersIn = (a, b) => new Set(money.filter((m) => (m.kind === 'reward' || m.kind === 'prize') && inWin(m.ts, a, b)).map((m) => m.w))
 
   const FAR = 1e12
   const totals = {
@@ -265,7 +306,9 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     // Stakes with no settlement yet: open challenges nobody accepted, and accepted duels never resolved.
     // A win settles both stakes (prize + cut = the pair), a refund settles one, so this is exactly what is left.
     duelUnsettled: sumKind('duelStake', 0, FAR) - sumKind('duelWin', 0, FAR) - sumKind('duelWin', 0, FAR, 'revenue') - sumKind('duelRefund', 0, FAR),
-    rewardsPaid: sumKind('reward', 0, FAR),
+    rewardsPaid: rewards(0, FAR),
+    rewardsGameplay: sumKind('reward', 0, FAR),
+    prizesPaid: sumKind('prize', 0, FAR),
     earners: earnersIn(0, FAR).size,
     itemsRegistered: events.filter((e) => e.event === 'ItemRegistered').length,
     verifiedCheckedAt: verifiedAt ? new Date(verifiedAt * 1000).toISOString() : null,
@@ -286,7 +329,8 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       marketplaceSpend: sumKind('mktSpend', a, b),
       revenue: revenue(a, b),
       staked: sumKind('duelStake', a, b),
-      rewards: sumKind('reward', a, b),
+      rewards: rewards(a, b),
+      prizes: sumKind('prize', a, b),
     })
   }
 
@@ -322,7 +366,7 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     const started = now >= sStart
     const flow = started ? {
       txs: txCount(sStart, upto), gMoved: moved(sStart, upto), gSpent: sumKind('in', sStart, upto),
-      revenue: revenue(sStart, upto), rewards: sumKind('reward', sStart, upto), staked: sumKind('duelStake', sStart, upto),
+      revenue: revenue(sStart, upto), rewards: rewards(sStart, upto), staked: sumKind('duelStake', sStart, upto),
       earners: earnersIn(sStart, upto).size,
     } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, staked: 0, earners: 0 }
     const stock = {
@@ -350,7 +394,7 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
         epoch: i + 1, start: dayKey(a), end,
         status: now >= b ? 'done' : now >= a ? 'live' : 'upcoming',
         txs: txCount(a, b), gMoved: moved(a, b), gSpent: sumKind('in', a, b), revenue: revenue(a, b), staked: sumKind('duelStake', a, b),
-        rewards: sumKind('reward', a, b), newPlayers: [...players].filter((w) => inWin(playerSince(w), a, b)).length,
+        rewards: rewards(a, b), newPlayers: [...players].filter((w) => inWin(playerSince(w), a, b)).length,
         activePlayers: activePlayers(a, b).size,
       }
     })
@@ -367,19 +411,25 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
         duelCut: sumKind('duelWin', ...win, 'revenue'),
       },
       staked: sumKind('duelStake', ...win),
+      prizes: sumKind('prize', ...win),
       duelStakes: countKind('duelStake', ...win),
       duelPaidToWinners: sumKind('duelWin', ...win),
       duelRefunded: sumKind('duelRefund', ...win),
       purchases: money.filter((x) => x.kind === 'mktSpend' && inWin(x.ts, ...win)).length,
       battles: events.filter((e) => e.event === 'BattleRecorded' && inWin(e.ts, ...win)).length,
-    } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, earners: 0, newPlayers: 0, activePlayers: 0, marketplaceSpend: 0, revenueBreakdown: { marketplace: 0, withdrawFee: 0, duelCut: 0 }, staked: 0, duelStakes: 0, duelPaidToWinners: 0, duelRefunded: 0, purchases: 0, battles: 0 }
+    } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, earners: 0, newPlayers: 0, activePlayers: 0, marketplaceSpend: 0, revenueBreakdown: { marketplace: 0, withdrawFee: 0, duelCut: 0 }, staked: 0, prizes: 0, duelStakes: 0, duelPaidToWinners: 0, duelRefunded: 0, purchases: 0, battles: 0 }
     const sDays = []
     if (started) for (let t = sStart; t < upto; t += DAY) {
       const a = t, b = t + DAY
       sDays.push({ date: dayKey(a), txs: txCount(a, b), newPlayers: [...players].filter((w) => inWin(playerSince(w), a, b)).length,
-        activePlayers: activePlayers(a, b).size, gMoved: moved(a, b), gSpent: sumKind('in', a, b), revenue: revenue(a, b), staked: sumKind('duelStake', a, b), rewards: sumKind('reward', a, b) })
+        activePlayers: activePlayers(a, b).size, gMoved: moved(a, b), gSpent: sumKind('in', a, b), revenue: revenue(a, b), staked: sumKind('duelStake', a, b), rewards: rewards(a, b) })
     }
-    season = { name: s.name, start: s.start, end: s.epochEnds[s.epochEnds.length - 1], started, counters, days: sDays, targets, epochs }
+    // Prizes paid in the run-up to the season (a program that ended and paid out days before it started).
+    // They count in all-time totals; listing them here keeps them visible on the season view without
+    // counting them toward season targets.
+    const lead = (s.preSeasonDays ?? 30) * DAY
+    const preSeasonPrizes = programs.filter((pg) => pg.paidG > 0 && pg.lastPaid && tsOf(pg.lastPaid) >= sStart - lead && tsOf(pg.lastPaid) < sStart)
+    season = { preSeasonPrizes, name: s.name, start: s.start, end: s.epochEnds[s.epochEnds.length - 1], started, counters, days: sDays, targets, epochs }
   }
 
   return {
@@ -389,7 +439,8 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       active: 'A player who played, bought, earned or sent/received G$ in the window, counted from contract events. Relay and team wallets excluded.',
       gMoved: 'G$ into plus out of Valor contracts, team wallets excluded. Includes duel stakes going in and duel prizes and refunds coming out.',
       gSpentInApp: 'G$ players paid into Valor contracts for something (marketplace, re-arms, pools). Duel stakes are not spending and are counted separately.',
-      rewards: 'G$ Valor paid players from its reward pools. Duel prizes and refunds are players\' own stakes changing hands, so they are counted separately.',
+      rewards: 'G$ Valor paid players from its reward pools: gameplay rewards plus season and campaign prizes. Duel prizes and refunds are players\' own stakes changing hands, so they are counted separately.',
+      prizes: 'Season and referral-campaign payouts, recognised by their on-chain reference (derived from the program id). Prizes paid before a season starts count in all-time totals and are listed on the season, but not toward its targets.',
       staked: 'G$ players put up as duel stakes (Face-Off and wave race share one escrow, so they are counted together).',
       duelUnsettled: 'Stakes not yet paid out or refunded: open challenges and accepted duels that never resolved. Prize plus cut equals both stakes, so this is what remains.',
       revenue: 'G$ Valor keeps: marketplace sales and resale fees, plus the withdrawal fee (relay-sent transfers into the treasury), plus the duel house cut (stake pair minus the winner\'s prize).',
@@ -398,7 +449,7 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       offchain: 'Groups are not in these contracts (they live in the Valor database).',
     },
     excludedWallets: [...excluded].map(([wallet, label]) => ({ wallet, label })),
-    totals, days, weekly, latestRetentionPct, season,
+    totals, prizePrograms: programs, days, weekly, latestRetentionPct, season,
   }
 }
 
@@ -422,6 +473,8 @@ export function printMetrics(m) {
   p('  withdrawal fees', `${fmt(t.withdrawFeeRevenue)} (${fmt(t.withdrawalsCharged)} withdrawals)`)
   p('  duel house cut', `${fmt(t.duelCutRevenue)} (${fmt(t.duelWins)} duel wins)`)
   p('Rewards paid / earners', `${fmt(t.rewardsPaid)} / ${fmt(t.earners)}`)
+  p('  gameplay / prizes', `${fmt(t.rewardsGameplay)} / ${fmt(t.prizesPaid)}`)
+  for (const pg of m.prizePrograms ?? []) p(`    ${pg.name}`, `${fmt(pg.paidG)} to ${fmt(pg.winners)} winners${pg.lastPaid ? ', paid ' + pg.lastPaid : ''}`)
   p('Duel stakes', `${fmt(t.duelStaked)} (${fmt(t.duelStakes)} stakes)`)
   p('  to winners / refunded', `${fmt(t.duelPaidToWinners)} (${fmt(t.duelWins)} wins) / ${fmt(t.duelRefunded)}`)
   p('  still held in the pool', fmt(t.duelUnsettled))

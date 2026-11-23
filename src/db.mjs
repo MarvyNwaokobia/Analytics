@@ -29,6 +29,13 @@ export function openDb(file = path.join(dir, '..', 'data', 'analytics.db')) {
       tx_sender TEXT NOT NULL, -- who sent the tx: a relay means the app moved it (a real fee), anyone else is a manual transfer
       PRIMARY KEY (project, block, log_index)
     );
+    -- Prize programs (seasons, referral campaigns) by id. A prize payout's on-chain reference is derived from
+    -- its program id, so these ids are what tell a prize apart from a gameplay reward.
+    CREATE TABLE IF NOT EXISTS programs (
+      project TEXT NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL,
+      starts_at TEXT, ends_at TEXT,
+      PRIMARY KEY (project, kind, id)
+    );
     CREATE TABLE IF NOT EXISTS blocks (block INTEGER PRIMARY KEY, ts INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS cursor (project TEXT PRIMARY KEY, last_block INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS verified (

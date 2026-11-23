@@ -45,6 +45,29 @@
         "maxDaysStakeToPayout": 30,
         "maxPayoutChunk": 10000
       },
+      "prizePrograms": {
+        "url": "https://valor-production.up.railway.app/seasons/programs",
+        "refFormats": {
+          "season": "season_payout:{id}:{wallet}:{i}",
+          "referralCampaign": "referral_campaign_payout:{id}:{wallet}:{i}"
+        },
+        "known": [
+          {
+            "kind": "season",
+            "id": "5a54fe93-25ec-4810-aaa5-a6c3ba8cb755",
+            "name": "Break Out Lautech",
+            "startsAt": "2026-11-08T23:00:00+00:00",
+            "endsAt": "2026-11-14T15:00:00+00:00"
+          },
+          {
+            "kind": "referralCampaign",
+            "id": "e1fab933-8ea0-4a93-a2c7-3ac35e5e9c6f",
+            "name": "Third Wave Referral Campaign",
+            "startsAt": "2026-09-18T05:45:21+00:00",
+            "endsAt": "2026-09-30T22:59:59+00:00"
+          }
+        ]
+      },
       "excludeWallets": {
         "0x222054050310e28a492c3ff4e2f120b936c4b99d": "Valor team funding wallet (pool funder)",
         "0x65d25f54cf80761b2d018ad10800921fce8303bf": "Valor relay (current)",
