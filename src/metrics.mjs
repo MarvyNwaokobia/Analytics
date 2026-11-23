@@ -145,9 +145,55 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
   }
   const withdrawn = events.filter((e) => e.event === 'RevenueWithdrawn').reduce((s, e) => s + gd(e.args.amount), 0)
 
+  // ---- revenue outside the marketplace
+  // Withdrawal fee: G$ a player's withdrawal sends to a revenue wallet (the treasury). Only transfers the relay
+  // sent count: that is the app charging the fee. Anyone sending G$ to the treasury by hand is not revenue.
+  const relays = new Set((project.relays ?? []).map((a) => a.toLowerCase()))
+  const revKinds = new Map(Object.entries(project.revenueWallets ?? {}).map(([a, w]) => [a.toLowerCase(), w.kind]))
+  const feeRows = revKinds.size ? db.prepare(`
+    SELECT r.revenue_wallet, r.from_wallet, r.tx_sender, r.amount, b.ts
+    FROM revenue_flows r JOIN blocks b ON b.block = r.block WHERE r.project = ?`).all(key) : []
+  for (const r of feeRows) {
+    if (!relays.has(r.tx_sender) || !isPlayerish(r.from_wallet)) continue
+    money.push({ ts: r.ts, kind: revKinds.get(r.revenue_wallet), g: gd(r.amount), revenue: gd(r.amount), w: r.from_wallet })
+  }
+  // Duel house cut: stakes are escrowed in a reward pool and the winner is paid from it, so the cut is what the
+  // pool keeps. A pool payout is a duel win when it equals the winner's share of a stake tier AND the winner put
+  // that same stake into the pool shortly before. Each stake backs at most one win. Draws and cancels refund the
+  // stake in full, so they carry no cut and are not counted here.
+  let duelWins = 0
+  if (project.duels) {
+    const d = project.duels
+    const pool = project.contracts[d.pool].toLowerCase()
+    const tierOfPayout = new Map(d.stakeTiers.map((t) => [Math.floor((2 * t * (10_000 - d.houseCutBps)) / 10_000), t]))
+    const maxGap = (d.maxDaysStakeToPayout ?? 30) * DAY
+    const stakes = new Map() // `${wallet}|${tier}` -> stake timestamps, oldest first, not yet matched
+    const ordered = flows.filter((f) => f.contract === pool && isPlayerish(f.wallet)).sort((a, b) => a.ts - b.ts)
+    for (const f of ordered) {
+      const g = gd(f.amount)
+      if (f.direction === 'in') {
+        if (!d.stakeTiers.includes(g)) continue
+        const k = `${f.wallet}|${g}`
+        if (!stakes.has(k)) stakes.set(k, [])
+        stakes.get(k).push(f.ts)
+        continue
+      }
+      const tier = tierOfPayout.get(g)
+      if (tier === undefined) continue
+      const open = (stakes.get(`${f.wallet}|${tier}`) ?? []).filter((t) => t <= f.ts && f.ts - t <= maxGap)
+      if (!open.length) continue
+      const list = stakes.get(`${f.wallet}|${tier}`)
+      list.splice(list.indexOf(open[0]), 1)
+      duelWins++
+      money.push({ ts: f.ts, kind: 'duelCut', g: 0, revenue: 2 * tier - g, w: f.wallet })
+    }
+  }
+
   // ---- helpers over a [from, to) window
   const inWin = (ts, a, b) => ts >= a && ts < b
   const sumKind = (kind, a, b, f = 'g') => money.filter((m) => m.kind === kind && inWin(m.ts, a, b)).reduce((s, m) => s + (m[f] ?? 0), 0)
+  const REVENUE_KINDS = new Set(['mktSpend', 'withdrawFee', 'duelCut'])
+  const revenue = (a, b) => money.filter((m) => REVENUE_KINDS.has(m.kind) && inWin(m.ts, a, b)).reduce((s, m) => s + (m.revenue ?? 0), 0)
   const moved = (a, b) => money.filter((m) => (m.kind === 'in' || m.kind === 'reward' || m.kind === 'mktOut') && inWin(m.ts, a, b)).reduce((s, m) => s + m.g, 0)
   const activePlayers = (a, b) => new Set(act.filter((x) => players.has(x.w) && inWin(x.ts, a, b)).map((x) => x.w))
   const activeAll = (a, b) => new Set(act.filter((x) => inWin(x.ts, a, b)).map((x) => x.w))
@@ -172,8 +218,13 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     gSpentInApp: sumKind('in', 0, FAR),
     gSpentMarketplace: sumKind('mktSpend', 0, FAR),
     marketplacePurchases: money.filter((m) => m.kind === 'mktSpend').length,
+    revenue: revenue(0, FAR),
     marketplaceRevenue: sumKind('mktSpend', 0, FAR, 'revenue'),
     marketplaceRevenueWithdrawn: withdrawn,
+    withdrawFeeRevenue: sumKind('withdrawFee', 0, FAR, 'revenue'),
+    withdrawalsCharged: money.filter((m) => m.kind === 'withdrawFee').length,
+    duelCutRevenue: sumKind('duelCut', 0, FAR, 'revenue'),
+    duelWins,
     rewardsPaid: sumKind('reward', 0, FAR),
     earners: earnersIn(0, FAR).size,
     itemsRegistered: events.filter((e) => e.event === 'ItemRegistered').length,
@@ -193,6 +244,7 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       gMoved: moved(a, b),
       gSpent: sumKind('in', a, b),
       marketplaceSpend: sumKind('mktSpend', a, b),
+      revenue: revenue(a, b),
       rewards: sumKind('reward', a, b),
     })
   }
@@ -229,7 +281,7 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
     const started = now >= sStart
     const flow = started ? {
       txs: txCount(sStart, upto), gMoved: moved(sStart, upto), gSpent: sumKind('in', sStart, upto),
-      revenue: sumKind('mktSpend', sStart, upto, 'revenue'), rewards: sumKind('reward', sStart, upto),
+      revenue: revenue(sStart, upto), rewards: sumKind('reward', sStart, upto),
       earners: earnersIn(sStart, upto).size,
     } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, earners: 0 }
     const stock = {
@@ -256,7 +308,7 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       return {
         epoch: i + 1, start: dayKey(a), end,
         status: now >= b ? 'done' : now >= a ? 'live' : 'upcoming',
-        txs: txCount(a, b), gMoved: moved(a, b), gSpent: sumKind('in', a, b), revenue: sumKind('mktSpend', a, b, 'revenue'),
+        txs: txCount(a, b), gMoved: moved(a, b), gSpent: sumKind('in', a, b), revenue: revenue(a, b),
         rewards: sumKind('reward', a, b), newPlayers: [...players].filter((w) => inWin(playerSince(w), a, b)).length,
         activePlayers: activePlayers(a, b).size,
       }
@@ -268,14 +320,19 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       newPlayers: [...players].filter((w) => inWin(playerSince(w), ...win)).length,
       activePlayers: activePlayers(...win).size,
       marketplaceSpend: sumKind('mktSpend', ...win),
+      revenueBreakdown: {
+        marketplace: sumKind('mktSpend', ...win, 'revenue'),
+        withdrawFee: sumKind('withdrawFee', ...win, 'revenue'),
+        duelCut: sumKind('duelCut', ...win, 'revenue'),
+      },
       purchases: money.filter((x) => x.kind === 'mktSpend' && inWin(x.ts, ...win)).length,
       battles: events.filter((e) => e.event === 'BattleRecorded' && inWin(e.ts, ...win)).length,
-    } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, earners: 0, newPlayers: 0, activePlayers: 0, marketplaceSpend: 0, purchases: 0, battles: 0 }
+    } : { txs: 0, gMoved: 0, gSpent: 0, revenue: 0, rewards: 0, earners: 0, newPlayers: 0, activePlayers: 0, marketplaceSpend: 0, revenueBreakdown: { marketplace: 0, withdrawFee: 0, duelCut: 0 }, purchases: 0, battles: 0 }
     const sDays = []
     if (started) for (let t = sStart; t < upto; t += DAY) {
       const a = t, b = t + DAY
       sDays.push({ date: dayKey(a), txs: txCount(a, b), newPlayers: [...players].filter((w) => inWin(playerSince(w), a, b)).length,
-        activePlayers: activePlayers(a, b).size, gMoved: moved(a, b), gSpent: sumKind('in', a, b), rewards: sumKind('reward', a, b) })
+        activePlayers: activePlayers(a, b).size, gMoved: moved(a, b), gSpent: sumKind('in', a, b), revenue: revenue(a, b), rewards: sumKind('reward', a, b) })
     }
     season = { name: s.name, start: s.start, end: s.epochEnds[s.epochEnds.length - 1], started, counters, days: sDays, targets, epochs }
   }
@@ -287,8 +344,10 @@ export function buildMetrics(db, key, project, now = Math.floor(Date.now() / 100
       active: 'A player who played, bought, earned or sent/received G$ in the window, counted from contract events. Relay and team wallets excluded.',
       gMoved: 'G$ into plus out of Valor contracts, team wallets excluded.',
       gSpentInApp: 'G$ players sent into Valor contracts (marketplace, Gauntlet re-entry, pools).',
-      revenue: 'On-chain marketplace revenue: primary sale prices plus resale fees. Withdrawal fee and duel house cut are not on this chain data.',
-      offchain: 'Groups and Face-Off stakes are not in these contracts yet (groups live in the Valor database; duel escrow is not indexed).',
+      revenue: 'G$ Valor keeps: marketplace sales and resale fees, plus the withdrawal fee (relay-sent transfers into the treasury), plus the duel house cut (stake pair minus the winner\'s prize).',
+      withdrawFee: 'The cut of each in-app withdrawal, sent by the relay to the treasury wallet. G$ sent to the treasury by hand is not counted.',
+      duelCut: 'A reward-pool payout counts as a duel win when it equals the winner\'s share of a stake tier and the winner staked that tier in the previous 30 days. The cut stays in the pool.',
+      offchain: 'Groups are not in these contracts (they live in the Valor database).',
     },
     excludedWallets: [...excluded].map(([wallet, label]) => ({ wallet, label })),
     totals, days, weekly, latestRetentionPct, season,
@@ -310,7 +369,10 @@ export function printMetrics(m) {
   p('G$ moved (team wallets excluded)', fmt(t.gMoved))
   p('G$ spent in app', fmt(t.gSpentInApp))
   p('  of which marketplace', `${fmt(t.gSpentMarketplace)} (${fmt(t.marketplacePurchases)} purchases)`)
-  p('Marketplace revenue / withdrawn', `${fmt(t.marketplaceRevenue)} / ${fmt(t.marketplaceRevenueWithdrawn)}`)
+  p('Revenue to Valor', fmt(t.revenue))
+  p('  marketplace / withdrawn from it', `${fmt(t.marketplaceRevenue)} / ${fmt(t.marketplaceRevenueWithdrawn)}`)
+  p('  withdrawal fees', `${fmt(t.withdrawFeeRevenue)} (${fmt(t.withdrawalsCharged)} withdrawals)`)
+  p('  duel house cut', `${fmt(t.duelCutRevenue)} (${fmt(t.duelWins)} duel wins)`)
   p('Rewards paid / earners', `${fmt(t.rewardsPaid)} / ${fmt(t.earners)}`)
   console.log('\nExcluded wallets:')
   m.excludedWallets.forEach((x) => console.log(`  ${x.wallet}  ${x.label}`))

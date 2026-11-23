@@ -21,6 +21,14 @@ export function openDb(file = path.join(dir, '..', 'data', 'analytics.db')) {
       direction TEXT NOT NULL CHECK (direction IN ('in','out')), amount TEXT NOT NULL,
       PRIMARY KEY (project, block, log_index)
     );
+    -- G$ Transfer logs INTO a project's revenue wallets (e.g. the withdrawal-fee treasury).
+    -- Kept apart from gd_flows: these wallets are not game contracts, so they must not count as play.
+    CREATE TABLE IF NOT EXISTS revenue_flows (
+      project TEXT NOT NULL, block INTEGER NOT NULL, log_index INTEGER NOT NULL,
+      tx_hash TEXT NOT NULL, revenue_wallet TEXT NOT NULL, from_wallet TEXT NOT NULL, amount TEXT NOT NULL,
+      tx_sender TEXT NOT NULL, -- who sent the tx: a relay means the app moved it (a real fee), anyone else is a manual transfer
+      PRIMARY KEY (project, block, log_index)
+    );
     CREATE TABLE IF NOT EXISTS blocks (block INTEGER PRIMARY KEY, ts INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS cursor (project TEXT PRIMARY KEY, last_block INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS verified (

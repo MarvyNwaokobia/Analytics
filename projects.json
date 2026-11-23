@@ -24,11 +24,35 @@
         "RewardPoolMain",
         "RewardPoolEndless"
       ],
+      "revenueWallets": {
+        "0x84a3d9f71dcf0d05841cdbdeae24a7a6e05a582d": {
+          "label": "Withdrawal fee treasury",
+          "kind": "withdrawFee",
+          "since": "2026-07-28"
+        }
+      },
+      "duels": {
+        "pool": "RewardPoolMain",
+        "stakeTiers": [
+          100,
+          500,
+          1000,
+          5000,
+          25000,
+          50000
+        ],
+        "houseCutBps": 50,
+        "maxDaysStakeToPayout": 30
+      },
       "excludeWallets": {
         "0x222054050310e28a492c3ff4e2f120b936c4b99d": "Valor team funding wallet (pool funder)",
         "0x65d25f54cf80761b2d018ad10800921fce8303bf": "Valor relay (current)",
         "0x43a5ba0da132b21bdacfbc4392b72eebaf6f2d82": "Valor relay (old)"
       },
+      "relays": [
+        "0x65d25f54cf80761b2d018ad10800921fce8303bf",
+        "0x43a5ba0da132b21bdacfbc4392b72eebaf6f2d82"
+      ],
       "season": {
         "name": "GoodBuilders Season 5",
         "start": "2026-11-16",
@@ -72,7 +96,7 @@
             "kind": "flow"
           },
           "revenue": {
-            "label": "Marketplace revenue (G$)",
+            "label": "Revenue to Valor (G$)",
             "value": 1000000,
             "kind": "flow"
           },

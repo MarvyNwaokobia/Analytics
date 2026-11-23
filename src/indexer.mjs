@@ -88,7 +88,54 @@ export async function indexProject({ db, client, cfg, key, project, log = consol
     if (Number((last - (cur ? BigInt(cur.last_block) : 0n)) / STEP) % 20 < Number(PARALLEL)) log(`[${key}] indexed to block ${last} / ${head}`)
     from = last + 1n
   }
+  await indexRevenueWallets({ db, client, cfg, key, project, head, log })
   await fillBlockTimes({ db, client, key, log })
+}
+
+// G$ received by the project's revenue wallets (wallets that are not game contracts, such as the
+// withdrawal-fee treasury). Runs on its own cursor so adding a wallet backfills it from `since`
+// without re-indexing the game contracts.
+async function indexRevenueWallets({ db, client, cfg, key, project, head, log }) {
+  const wallets = Object.entries(project.revenueWallets ?? {})
+  if (!wallets.length) return
+  const addrs = wallets.map(([a]) => a.toLowerCase())
+  const earliest = wallets.map(([, w]) => w.since ?? project.startDate).sort()[0]
+  const curKey = `${key}#revenue`
+  const cur = db.prepare('SELECT last_block FROM cursor WHERE project = ?').get(curKey)
+  let from = cur
+    ? BigInt(cur.last_block) + 1n
+    : await blockAtOrAfter(client, Math.floor(new Date(earliest).getTime() / 1000))
+  const STEP = 5_000n
+  const PARALLEL = 8n
+  const ins = db.prepare('INSERT OR IGNORE INTO revenue_flows VALUES (?,?,?,?,?,?,?,?)')
+  const setCur = db.prepare('INSERT INTO cursor VALUES (?,?) ON CONFLICT(project) DO UPDATE SET last_block = excluded.last_block')
+  const gd = cfg.gdToken.toLowerCase()
+  let rounds = 0
+  while (from <= head) {
+    const windows = []
+    for (let i = 0n; i < PARALLEL && from + i * STEP <= head; i++) {
+      const a = from + i * STEP
+      windows.push([a, a + STEP - 1n > head ? head : a + STEP - 1n])
+    }
+    const fetched = (await Promise.all(windows.map(([a, b]) =>
+      getLogsAdaptive(client, { address: gd, event: TRANSFER, args: { to: addrs } }, a, b)))).flat()
+    // The log does not say who sent the tx, and that is what separates an app-charged fee
+    // (relay-sent) from someone transferring G$ to the wallet by hand.
+    const sender = new Map()
+    for (const h of [...new Set(fetched.map((l) => l.transactionHash))]) {
+      sender.set(h, (await client.getTransaction({ hash: h })).from.toLowerCase())
+    }
+    db.exec('BEGIN')
+    for (const l of fetched) {
+      ins.run(key, Number(l.blockNumber), l.logIndex, l.transactionHash,
+        l.args.to.toLowerCase(), l.args.from.toLowerCase(), l.args.value.toString(), sender.get(l.transactionHash))
+    }
+    const last = windows[windows.length - 1][1]
+    setCur.run(curKey, Number(last))
+    db.exec('COMMIT')
+    if (++rounds % 20 === 0) log(`[${key}] revenue wallets indexed to block ${last} / ${head}`)
+    from = last + 1n
+  }
 }
 
 // Timestamps for every block that has a project log or flow.
@@ -96,7 +143,8 @@ async function fillBlockTimes({ db, client, key, log }) {
   const need = db.prepare(`
     SELECT block FROM (
       SELECT block FROM logs WHERE project = ? UNION SELECT block FROM gd_flows WHERE project = ?
-    ) WHERE block NOT IN (SELECT block FROM blocks)`).all(key, key).map((r) => BigInt(r.block))
+      UNION SELECT block FROM revenue_flows WHERE project = ?
+    ) WHERE block NOT IN (SELECT block FROM blocks)`).all(key, key, key).map((r) => BigInt(r.block))
   const ins = db.prepare('INSERT OR IGNORE INTO blocks VALUES (?,?)')
   for (let i = 0; i < need.length; i += 200) {
     const batch = await Promise.all(need.slice(i, i + 200).map((n) => client.getBlock({ blockNumber: n })))
